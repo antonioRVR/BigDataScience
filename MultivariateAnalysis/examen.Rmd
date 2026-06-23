@@ -1,0 +1,672 @@
+---
+title: "Examen Módulo 4 - 2026"
+author: "Antonio Ramón Vázquez Ramírez"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+  pdf_document:
+    toc: true
+    toc_depth: '4'
+---
+
+# Carga de paquetes
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tibble)
+  library(skimr)
+  library(corrplot)
+  library(psych)
+  library(MASS)
+  library(plm)
+  library(RGCCA)
+  library(ca)
+  library(FactoMineR)
+  library(factoextra)
+})
+```
+
+\
+\
+Instrucciones
+
+Deben realizar los ejercicios en RMarkdown, en el que además del código R para ejecutar los ejercicios incluirá los comentarios, explicación e interpretación de los modelos aplicados y los reportes obtenidos.
+
+Deben incluir en el RMarkdown todos los procesos que hayan realizado.
+
+La resolución de sus casos deberán entregarla a través de la aplicación del curso virtual en el enlace del menú izquierdo “TAREAS” (conforme a las instrucciones dadas en el foro).
+
+------------------------------------------------------------------------
+
+# Ejercicios
+
+# Descripción del dataset para las preguntas 1, 2 y 3
+
+Con el fichero **Indicador_SOCIODEMO.csv**, que incluye información a nivel de las secciones censales de Santander relativa a los censos de 2001 y 2011, se dispone de las siguientes variables:
+
+-   COD SECC: código de sección censal.
+-   75_2001, 75_2011: porcentaje de población de 75 años y más.
+-   HOG_64_2001, HOG_64_2011: porcentaje de hogares unipersonales de mayores de 64 años.
+-   HOG_MONO_2001, HOG_MONO_2011: porcentaje de hogares con un adulto y un menor o más.
+-   EXT_2001, EXT_2011: porcentaje de población extranjera.
+-   EXT_MEN_2001, EXT_MEN_2011: porcentaje de población extranjera infantil.
+
+Para responder a las preguntas 1, 2 y 3, trabaje con los datos correspondientes a 2011.
+
+Antes de desarrollar esos apartados
+
+-   Extraiga y prepare los datos de 2011 para el análisis.
+-   Realice un análisis exploratorio de las variables del data-set.
+-   Obtenga la matriz de correlaciones entre las variables seleccionadas.\
+
+Preparamos el directorio de trabajo:
+
+```{r}
+setwd("G:/Mi unidad/Antonio/estudios/BigData&DataScience/M4/Examen_practico")
+df_sociodemo <- read.csv("Indicador_SOCIODEMO.csv", sep = ";", dec = ",")
+
+```
+
+Extraemos los datos requeridos, solamente extraemos el año 2011 y convertimos el código censal a nombre de columna para no afectar a los análisis de distancias:
+
+```{r}
+
+datos_2011 <- df_sociodemo %>%
+  column_to_rownames(var = "COD.SECC") %>%
+  dplyr::select(ends_with("2011"))
+
+head(datos_2011)
+
+```
+
+ahora podemos explorar brevemente los datos con summary y skim
+
+```{r}
+summary(datos_2011)
+```
+
+```{r}
+
+skim(datos_2011)
+```
+
+-   No tenemos valores nulos en los datos, por lo que no es necesario aplicar técnicas de imputación.
+
+-   Aunque la media de población extranjera total (`EXT_2011`) es del 8,55%, hay secciones donde supone hasta el 46%. Más extremo es el caso de la población extranjera infantil (`EXT_MEN_2011`): el primer cuartil y la mediana son 0.00, lo que significa que en al menos la mitad de las secciones censales no hay (o es residual) población extranjera infantil. Sin embargo, su media sube al 9,13% arrastrada por valores máximos muy atípicos que alcanzan hasta el 75%. Esto indica una distribución fuertemente asimétrica hacia la derecha, con una concentración poblacional muy focalizada en barrios concretos.
+
+-   El porcentaje de hogares con un adulto y menores (`HOG_MONO_2011`) es la variable con la menor media (5,14%) y la menor dispersión (desviación típica de 4,19). Aun así, se observan zonas donde este tipo de hogar representa hasta el 19% del total.
+
+-   Se observa similitud entre el porcentaje de población mayor de 75 años (X75_2011) y el porcentaje de hogares unipersonales de mayores de 64 años (HOG_64_2011) Tienen medias del 12,39% y 13,31% respectivamente, pero alcanzan valores máximos bastante elevados (31,93% y 35,02%), lo que indica que existen ciertas secciones censales altamente envejecidas.
+
+\
+Ahora vamos a ver la matriz de correlación:
+
+```{r}
+
+matriz_cor <- cor(datos_2011)
+print(round(matriz_cor, 3))
+
+```
+
+se detectan relaciones lineales de intensidad moderada-alta que justifican la reducción de dimensiones. Concretamente, destaca la fuerte correlación positiva (r=0.636) entre el porcentaje de población mayor de 75 años (`X75_2011`) y el porcentaje de hogares unipersonales de mayores de 64 años (`HOG_64_2011`), como habiamos planteado anteriormente. Asimismo, existe una ligera correlación positiva (r=0.374) entre el porcentaje total de población extranjera (`EXT_2011`) y el porcentaje de población extranjera infantil (`EXT_MEN_2011`).
+
+------------------------------------------------------------------------
+
+# Ejercicio 1 - Análisis de componentes principales (2 puntos)
+
+Con la misma base de datos de 2011, realice un análisis de componentes principales.
+
+1.  Justificar si las variables del data-set pueden ser utilizadas para un análisis de componentes principales, comentando los resultados obtenidos.
+
+Para esto, realizamos un test de esfericidad de Bartlet
+
+```{r}
+cortest.bartlett(matriz_cor, n = nrow(datos_2011))
+
+
+```
+
+En nuestro modelo, el estadístico Chi-cuadrado de 109.49 con 10 grados de libertad. El p-valor obtenido (6.76×10 −19 ) es prácticamente cero por lo que se rechaza la hipótesis nula . Esto confirma estadísticamente que las variables están correlacionadas entre sí y, por lo tanto, tiene sentido la reducción de dimensiones
+
+Ahora vamos a ver el indice KMO
+
+```{r}
+KMO(datos_2011)
+
+```
+
+El resultado obtenido es de es de **0.53**. Según el baremo de Kaiser, esto es un valor bajo pero aceptable por lo que el modelo sigue siendo adecuado para realizar un Analisis de Componentes principales
+
+2.  Calcular los componentes principales basados en la matriz de correlaciones.
+
+```{r}
+pca_2011 <- prcomp(datos_2011, scale = TRUE)
+pca_2011
+```
+
+3.  Justificar la selección de componentes para reducir el número de variables del data-set utilizando los autovalores y el gráfico de sedimentación.
+
+    ```{r}
+    autovalores <- pca_2011$sdev^2
+    print("Autovalores:")
+    print(round(autovalores, 3))
+
+    ```
+
+4.  Indicar qué porcentaje de la varianza del conjunto de datos explican las nuevas variables obtenidas.
+
+    ```{r}
+
+    summary(pca_2011)
+
+    ```
+
+5.  Interpretar los coeficientes seleccionados
+
+-   Para determinar las componentes principales, seguimos primero el criterio de los autovalores. Vemos que solamente los dos primeros autovalores son mayores que 1, justificando la elección de 2 componentes principales
+
+-   Por el criterio de la varianza, sería adecuado seleccionar factores que expliquen al menos 60% de la varianza cuando el conjunto de datos esta ubicado en las ciencias sociales. Esto lo podemos lograr eligiendo PC1 y PC2, que nos daría una varianza de 63.03%
+
+-   Finalmente, mediante el criterio de la matriz de rotaciones podemos sacar los siguientes analisis
+
+-   **Componente 1 (PC1 - "Envejecimiento"):** Presenta las correlaciones positivas más altas con las variables **`HOG_64_2011`** (0.643) y **`X75_2011`** (0.633). Dado que estas variables miden la proporción de hogares unipersonales de mayores de 64 años y la población mayor de 75 años, este eje representa claramente el **nivel de envejecimiento** de la sección censal.
+
+-   **Componente 2 (PC2 - "Inmigración"):** Este componente está fuertemente dominado por las variables **`EXT_MEN_2011`** (0.719) y **`EXT_2011`** (0.617). Al referirse a la población extranjera total e infantil, podemos etiquetar esta nueva dimensión como el **nivel de concentración de población extranjera**.
+
+3.  Crear un nuevo data-set con las nuevas variables retenidas y realizar un análisis estadístico descriptivo de las dos variables principales obtenidas.
+
+Seleccionamos las componentes y las renombramos con la interpretación
+
+```{r}
+datos_pca_final <- as.data.frame(pca_2011$x[, 1:2])
+
+colnames(datos_pca_final) <- c("Envejecimiento", "Inmigracion")
+
+```
+
+3.  Indicar si las nuevas variables están correlacionadas.
+
+```{r}
+summary(datos_pca_final)
+
+```
+
+```{r}
+round(cor(datos_pca_final), 3)
+
+
+```
+
+Vemos que no tenemos correlación entre las variables ya que la matriz de correlación muestra el valor 0 entre ellas
+
+------------------------------------------------------------------------
+
+# Ejercicio 2 - Análisis factorial (2 puntos)
+
+Con la misma base de datos de 2011, plantee un análisis factorial exploratorio con la librería **psych**.
+
+1.  *Utilizar la matriz de correlaciones y el método de ejes principales para obtener los factores.*
+
+    Calculamos la matriz de correlacions con pearson
+
+    ```{r}
+    matriz_cor_af <- cor(datos_2011, method = "pearson")
+    matriz_cor_af
+    ```
+
+    Realizamos el Análisis Factorial usando la matriz de correlaciones y el método de ejes principales
+
+    Para determinar el número óptimo de dimensiones latentes a extraer, se utilizamos `fa.parallel`. Esta técnica sugiere la retención de **2 factores**
+
+    ```{r}
+    fa.parallel(datos_2011, fm = "pa", fa = "fa")
+    ```
+
+    Vemos que tenemos que coger dos factores
+
+    se ha aplicado una **rotación ortogonal Varimax**. para redistribuir la varianza maximizando las cargas factoriales al cuadrado de cada variable para cada facto
+
+    ```{r}
+
+    modelo_af <- fa(r = datos_2011, nfactors = 2, fm = "pa", rotate = "varimax")
+    print(modelo_af)
+
+    print(modelo_af$loadings)
+    ```
+
+2.  *Comentar los resultados obtenidos.*
+
+    -   **Varianza:** El modelo conjunto explica un **45% de la varianza total** de las variables originales. Dentro de esta varianza compartida retenida por el modelo, el primer factor (PA1) explica un 60% y el segundo factor (PA2) asume el 40% restante.
+
+    -   **Bondad de ajuste:** Contamos con un ajuste muy robusto con un Índice Tucker Lewis (TLI) de fiabilidad factorial de **0.913** (un valor superior a 0.9 denota un buen ajuste) y la raíz media cuadrática de los residuos (RMSR) es excepcionalmente baja (**0.02**). Asimismo, el índice RMSEA se sitúa en **0.077**, un valor plenamente aceptable.
+
+    El primer factor cuenta con una saturación prácticamente nula en las variables de población extranjera **0.107 y 0.119**, por lo que confirma nuestras suposiciones de que representa el envejecimiento.
+
+    Lo Mismo ocurre para los el segundo factor con **0.788** de carga positiva para la población extranjera, por lo que este factor representa inequívocamente la inmigracion
+
+    Por ultimo, podemos observar que la variable Hog_mono_2011 solo presenta una contribución negativa y debil en el primer factor, por lo que no es determinante en la formación principal de niguna de las dos nuevas dimensiones extraidas
+
+3.  *Indicar qué procedimiento ha utilizado para obtener la matriz de correlación.*
+
+-   Para calcular las correlaciones se ha utilizado el coeficiente de correlación de Pearson ya que nuestras variables representan porcentajes en una escala continua y bien definida
+
+1.  *Obtener las puntuaciones de los nuevos factores.*
+
+```{r}
+puntuaciones_af <- as.data.frame(modelo_af$scores)
+
+```
+
+1.  *Realizar un análisis estadístico de dichas puntuaciones e indicar el método utilizado para obtener los nuevos factores.*
+
+    ```{r}
+    summary(puntuaciones_af)
+    ```
+
+    las nuevas variables PA1 (Envejecimiento) y PA2 (Inmigración), corroboran estadísticamente que el valor de la media en ambos factores es exactamente 0.0000
+
+    -   **Distribución del Factor 1:** Las puntuaciones presentan un rango que oscila entre un mínimo de $-1.698$ y un máximo de $+2.594$. La mediana ($0.066$) se encuentra muy próxima a cero, lo que denota una distribución bastante equilibrada, aunque el valor máximo indica la existencia de secciones censales atípicas con un envejecimiento severo que puede llegar a ser un outlier
+
+    -   **Distribución del Factor 2:** Este factor muestra un comportamiento con mayor asimetría positiva (cola hacia la derecha). El rango va desde un mínimo de $-0.813$ hasta un máximo muy elevado de $+2.911$. La mediana de este factor es negativa ($-0.416$), lo que nos indica estadísticamente que **la gran mayoría de las secciones censales tienen niveles de población extranjera inferiores a la media global de la ciudad**, y que la media se ve arrastrada hacia el cero debido a un puñado de secciones específicas donde la concentración migratoria mas alta.
+
+2.  *Según este resultado, indicar cuáles son las 10 secciones más vulnerables demográficamente de Santander.*
+
+Para la vulnerabilidad calculamos la suma de ambas componentes
+
+```{r}
+puntuaciones_af <- puntuaciones_af %>%
+  mutate(Vulnerabilidad = PA1 + PA2,
+         Seccion_Censal = rownames(puntuaciones_af))
+
+top_10_vulnerables <- puntuaciones_af %>%
+  arrange(desc(Vulnerabilidad)) %>%
+  head(10)
+print(top_10_vulnerables[, c("Seccion_Censal", "PA1", "PA2", "Vulnerabilidad")])
+```
+
+Podemos observar con los resultados como algunas secciones censales son mas vulnerables por el conjunto de envejecimiento y migracion, mientras que otras solamente tienen un factor dominante
+
+------------------------------------------------------------------------
+
+# Ejercicio 3 - Análisis cluster (1 punto)
+
+Con los resultados del análisis factorial anterior, realice un análisis cluster de las secciones censales de Santander.
+
+1.  Utilizar la distancia Manhattan.
+2.  Seleccionar el método de agrupamiento más adecuado, justificando la elección.
+3.  Justificar el número de cluster a seleccionar.
+4.  Incluir en la base de datos de resultados el cluster al que pertenece cada sección censal.
+
+Primero calculamos las distancias de Manhattan
+
+```{r}
+distancias <- dist(puntuaciones_af[, c("PA1", "PA2")], method = "manhattan")
+
+```
+
+Para el método de agrupamiento, utilizamos métodos jerárquicos, ya que tenemos un dataset sociecónomico y estos métodos son los mas adecuados para datos de este tipo. En concreto, utilizamos el metodo de ward, ya que este metodo permite obtener clusteres compactos y equilibrados con alta homogeneidad
+
+```{r}
+modelo_cluster <- hclust(distancias, method = "ward.D2")
+plot(modelo_cluster, main = "Dendrograma de las Secciones Censales", 
+     xlab = "Secciones", ylab = "Altura (Distancia)", sub = "", cex = 0.5)
+rect.hclust(modelo_cluster, k = 5, border = "red")
+
+```
+
+Decidimos elegir 5 clusteres. por el dendograma. ya que al trazar una linea horizontal en la altura diez, agrupamos las secciones censales reduciendo el incremento de verticalidad en los grupos del dendrograma. Para verificar estos grupos, se han añadido las correspondientes cajas de agrupación a la visualización anterior
+
+```{r}
+# Incluimos la informacion del arbol cortado como factor en la base de resultados
+grupos_ward <- cutree(modelo_cluster, k = 5)
+puntuaciones_af$Cluster <- as.factor(grupos_ward)
+table(puntuaciones_af$Cluster)
+head(puntuaciones_af)
+
+```
+
+------------------------------------------------------------------------
+
+# Ejercicio 4 - Multidimensional Scaling (2 puntos)
+
+Con el conjunto de datos **plm::Produc**, que contiene información económica de distintos estados de Estados Unidos, trabaje con el año 1986 y con las variables:
+
+-   pcap: stock de capital público,
+-   hwy: infraestructuras viarias,
+-   water: infraestructuras de agua y saneamiento,
+-   util: otras infraestructuras públicas,
+-   pc: stock de capital privado,
+-   gsp: producto bruto estatal,
+-   emp: empleo no agrícola,
+-   unemp: tasa de desempleo.
+
+Se pide
+
+-   Leer y preparar los datos, justificando las transformaciones realizadas antes de calcular distancias.
+-   Presentar una tabla o resumen descriptivo de las variables empleadas.
+-   Analizar la estructura de relación entre variables con una representación adecuada.
+-   Aplicar MDS clásico con `cmdscale()`, MDS no métrico con `isoMDS()` y Sammon con `sammon()`.
+-   Generar un gráfico comparativo de las soluciones obtenidas.
+-   Seleccionar una solución principal e interpretar económicamente las dos dimensiones del mapa.
+-   Identificar qué estados aparecen como más próximos y cuáles como más alejados.
+
+Empezamos cargando los datos de la libreria plm y cargando las variables solicitadas
+
+```{r}
+data("Produc", package = "plm")
+
+```
+
+```{r}
+datos_1986 <- Produc %>%
+  filter(year == 1986) %>%
+  dplyr::select(state, pcap, hwy, water, util, pc, gsp, emp, unemp)
+```
+
+```{r}
+rownames(datos_1986) <- datos_1986$state
+datos_1986$state <- NULL
+
+print(summary(datos_1986))
+
+```
+
+Vemos que las variables estan en diferentes escalas, por lo que debemos realizar un escalado
+
+```{r}
+datos_mds_escala <- scale(datos_1986)
+
+```
+
+```{r}
+summary(datos_mds_escala)
+
+```
+
+Analizamos la estrucutra de correlacación entre nuestros datos calculado mediante Pearson y se representan numericamente
+
+```{r}
+matriz_cor_mds <- cor(datos_mds_escala)
+
+corrplot(matriz_cor_mds, method="number", type="upper", order="hclust",
+         tl.col="black", tl.srt=45, 
+         title="Correlación entre variables", mar=c(0,0,1,0))
+```
+
+```{r}
+matriz_cor_mds
+```
+
+A excepcion de la variable de desempleo `unemp`, se aprecian correlaciones positivas altas entre las variables Esta altísima interdependencia y redundancia de la información es precisamente lo que hace idóneo someter estos datos a una técnica de reducción geométrica, ya que gran parte de las variables están midiendo el mismo peso económico del estado
+
+Ahora calculamos la matriz de distancias para utilizar los modelos solicitados
+
+```{r}
+distancias_prod <- dist(datos_mds_escala)
+
+```
+
+Y realizamos los modelos con 2 dimensiones para facilitar la visualización
+
+```{r}
+# 2. MDS Clásico
+mds_clasico <- cmdscale(distancias_prod, k = 2)
+
+# 3. MDS No métrico
+mds_iso <- isoMDS(distancias_prod, k = 2)
+mds_iso_puntos <- mds_iso$points
+
+# 4. MDS Sammon
+mds_sammon <- sammon(distancias_prod, k = 2)
+mds_sammon_puntos <- mds_sammon$points
+```
+
+Para facilitar la visualización, se va a sustituir el nombre de los estados por su abreviaturas, haciendo mas legible la representación gráfica
+
+```{r}
+
+# emparejar nombres de estados con su abreviaturas
+nombres_estados <- rownames(mds_clasico)
+abreviaturas_estados <- state.abb[match(tolower(nombres_estados), tolower(state.name))]
+
+#  si algún territorio no se empareja, dejamos sus 2 primeras letras
+abreviaturas_estados[is.na(abreviaturas_estados)] <- substr(nombres_estados[is.na(abreviaturas_estados)], 1, 2)
+
+# Configurar el plot
+par(mfrow = c(1, 3), mar = c(2, 2, 3, 1), oma = c(2.5, 2.5, 0, 0))
+
+#  MDS Clásico
+plot(mds_clasico[,1], mds_clasico[,2], type = "n", main = "MDS Clásico", xlab = "", ylab = "")
+text(mds_clasico[,1], mds_clasico[,2], labels = abreviaturas_estados, cex = 1.0, col = "blue", font = 2)
+
+#  isoMDS (No Métrico)
+plot(mds_iso_puntos[,1], mds_iso_puntos[,2], type = "n", main = "isoMDS (No Métrico)", xlab = "", ylab = "")
+text(mds_iso_puntos[,1], mds_iso_puntos[,2], labels = abreviaturas_estados, cex = 1.0, col = "red", font = 2)
+
+# Sammon
+plot(mds_sammon_puntos[,1], mds_sammon_puntos[,2], type = "n", main = "Sammon", xlab = "", ylab = "")
+text(mds_sammon_puntos[,1], mds_sammon_puntos[,2], labels = abreviaturas_estados, cex = 1.0, col = "darkgreen", font = 2)
+
+# 6. Añadir las etiquetas globales únicas en los márgenes exteriores
+mtext("Dimensión 1", side = 1, outer = TRUE, line = 1, cex = 1.1, font = 2)
+mtext("Dimensión 2", side = 2, outer = TRUE, line = 1, cex = 1.1, font = 2)
+
+# 7. Restaurar la configuración gráfica original de R
+par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1, oma = c(0, 0, 0, 0))
+```
+
+Las tres configuraciones estructurales son muy similares, dibujando un mapa de distribución prácticamente idéntico lo que indica que la estructura de los datos macroeconómicos de 1986 es coherente independientemente del algoritmo de optimización empleado.
+
+Tras los analisis anteriores, se decide utilizar el uso de sammon. Al ser datos macroeconómicos continuos y reales, se descarta el MDS No Métrico, ya que este deshecha las magnitudes cuantitativas en favor de simples rangos ordinales.
+
+El MDS Clásico optimiza errores absolutos globales. Como existen estados muy grandes económicamente (CA, NY, TX), este algoritmo prioriza el posicionamiento de estos estados, aplastando y amontonando a los estados pequeños en una esquina ilegible.
+
+Sammon introduce una ponderación inversa en su función de coste, penalizando con mayor severidad los errores en las distancias cortas. Esto garantiza que la estructura interna de los estados pequeños y medianos se mantenga claramente distingible
+
+Al observar el mapa de la solución de Sammon, constatamos visualmente este fenómeno. Los estados económicamente más enriquecidos, aparecen muy alejados y aislados en los extremos del plano, reflejando su gran tamaño macroeconómico diferencial. Por el contrario, en el el otro lado del gráfico, encontramos una alta proximidad entre estados con un peso económico mucho menor, que conforman un grupo homogéneo de perfiles macroeconómicos similares, aunque siguen manteniendo sus distancias y no colapsan como en otros graficos, permitiendonos ver su estrcutura local
+
+------------------------------------------------------------------------
+
+# Ejercicio 5 - Correlación Canónica (2 puntos)
+
+Con el conjunto de datos **plm::Snmesp**, que contiene información de empresas españolas, trabaje con el año 1990 y defina los siguientes bloques:
+
+Bloque de producción: y, i, k
+
+Bloque laboral-financier: n, w, f
+
+Las variables significan:
+
+-   n: logaritmo del empleo,
+-   w: logaritmo de los salarios,
+-   y: logaritmo de la producción real,
+-   i: logaritmo de los consumos intermedios,
+-   k: logaritmo del capital real,
+-   f: flujo de caja real.
+
+Se pide
+
+1.  Leer y preparar los datos para el análisis.
+
+    Filtramos el año 1990 y separamos los bloques escalando los datos
+
+    ```{r}
+    data("Snmesp", package = "plm")
+    datos_1990 <- Snmesp %>% filter(year == 1990)
+
+    ```
+
+2.  Presentar una descripción inicial de ambos bloques.
+
+    ```{r}
+    bloque_prod <- datos_1990 %>% dplyr::select(y, i, k) %>% scale()
+    bloque_lab_fin <- datos_1990 %>% dplyr::select(n, w, f) %>% scale()
+    print("Descripción del Bloque de Producción:")
+    summary(bloque_prod)
+    print("Descripción del Bloque laboral-financiero:")
+
+    summary(bloque_lab_fin)
+    ```
+
+3.  Analizar las correlaciones cruzadas entre los dos grupos de variables.
+
+    ```{r}
+    cor_cruzada <- cor(bloque_prod, bloque_lab_fin)
+    print("Matriz de Correlaciones Cruzadas:")
+    round(cor_cruzada, 3)
+    ```
+
+    Al inspeccionar la matriz de correlaciones cruzadas entre el bloque de Producción y el Laboral-Financiero, podemos observar la existencia de correlaciones lineales muy intensas entre el volumen de empleo (`n)` y la producción real (`y`) y los consumos (`i`) , con valores de 0.900 y 0.855 respectivamente. Esta alta colinealidad cruzada es el indicador que justifica la aplicación de un Análisis de Correlación Canónica (CCA) para explorar las dimensiones latentes conjuntas entre ambas estructuras de la empresa.
+
+4.  Realizar una Correlación Canónica clásica con `cancor()`.
+
+    ```{r}
+    modelo_cca <- cancor(bloque_prod, bloque_lab_fin)
+    ```
+
+5.  Obtener e interpretar las correlaciones canónicas.
+
+    ```{r}
+    modelo_cca
+    ```
+
+    Podemos observar que contamos con una altísima correlación entre las variables de producción y laboral financiera. Sin embargo, el resto de correlaciones son bajas e inapreciables
+
+    Los coeficientes nos indican que, en el bloque de producción, la variable con más peso es la producción bruta **-0.093** seguida por la inversión **+0.0603**. El stock de capital es irrelevante en este bloque.
+
+    En el bloque laboral financiero, el peso dominante lo tiene el empleo **-0.0305**, seguido por los salarios **-0.0100**. El flujo de caja no aporta un peso significativo.
+
+6.  Representar gráficamente el primer par de variables canónicas y comentar su significado.
+
+    ```{r}
+    U1 <- as.matrix(bloque_prod) %*% modelo_cca$xcoef[, 1]
+    V1 <- as.matrix(bloque_lab_fin) %*% modelo_cca$ycoef[, 1]
+
+    plot(U1, V1, main = "Primer par de Variables Canónicas (U1 vs V1)",
+         xlab = "Dimensión Canónica 1 (Bloque Producción)",
+         ylab = "Dimensión Canónica 1 (Bloque Lab-Fin)",
+         col = "darkblue", pch = 16)
+    abline(lm(V1 ~ U1), col = "red", lwd = 2)
+    ```
+
+    Se puede observar una asociación lineal positiva muy fuerte entre ambas dimensiones canónicas, ya que los puntos se distribuyen muy próximos a la recta de regresión
+
+    Esto indica que las combinaciones lineales de las variables de producción están estrechamente relacionadas con las combinaciones lineales de las variables laborales y financieras
+
+    La escasa dispersión de los puntos alrededor de la recta sugiere que la primera correlación canónica captura una parte importante de la relación existente entre ambos bloques de variables. no se observan grupos claramente diferenciados
+
+    Estos resultados son coherentes con el elevado valor de la primera correlación canónica.
+
+7.  Construir un mapa de variables o representación equivalente que ayude a interpretar las cargas de cada bloque.
+
+    ```{r}
+    cargas_prod <- cor(bloque_prod, U1)
+    cargas_lab_fin <- cor(bloque_lab_fin, V1)
+    print("Cargas (Loadings) del Bloque de Producción en U1:")
+    cargas_prod
+    print("Cargas (Loadings) del Bloque Laboral-Financiero en V1:")
+    cargas_lab_fin
+    ```
+
+    Mediante las cargas, podemos comprobar como las variables del bloque de producción tienen pesos considerablemente altos y en la misma dirección. Sin embargo, en el bloque laboral-financiero solamente la variable del empleo nos aporta una carga significativa
+
+8.  Comparar los resultados con una solución mediante RGCCA e indicar si la interpretación principal se mantiene.
+
+    El metodo RGCCA introduce un parametro de regularización tau, para asegurar la estabilidad en la inversión de la matriz, y que sea menos sensible a la multicolinealidad . En nuestro caso definimos este parametro como **optimal** para que R calcule automaticamente el más adecuado para nuestro caso
+
+    ```{r}
+    bloques_rgcca <- list(Produccion = bloque_prod, Lab_Fin = bloque_lab_fin)
+    # Aplicamos RGCCA forzando la correlación canónica pura (tau = 0 para método CCA)
+    modelo_rgcca <- rgcca(bloques_rgcca, method = "rgcca", tau = "optimal",scale = FALSE)
+
+    ```
+
+```{r}
+
+u1_rgcca <- modelo_rgcca$Y[[1]][, 1]
+v1_rgcca <- modelo_rgcca$Y[[2]][, 1]
+
+correlacion_rgcca <- cor(u1_rgcca, v1_rgcca)
+
+cat("Correlación Canónica Clásica (cancor):", modelo_cca$cor[1], "\n")
+cat("Correlación Canónica Regularizada (RGCCA):", correlacion_rgcca, "\n")
+```
+
+La introducción del parámetro de regularización óptimo apenas genera una contracción marginal en el coeficiente de correlación (una variación de tan solo 0.00943. Lo que demuestra la fuerte asociación lineal existente entre las dimensiones de Producción y la realidad Laboral-Financiera
+
+------------------------------------------------------------------------
+
+# Ejercicio 6 - Análisis de Correspondencias Simples (1 punto)
+
+Con el conjunto de datos **ca::smoke**, que recoge una tabla de contingencia entre cinco grupos de personal de una organizacion ficticia y cuatro categorias de consumo de tabaco (none, light, medium, heavy), realice un Analisis de Correspondencias Simples usando `FactoMineR::CA()`.
+
+Se pide
+
+1.  Presentar la tabla de contingencia y realizar una descripcion inicial de los perfiles observados.
+
+2.  Aplicar el Análisis de Correspondencias Simples y generar un biplot simétrico de las dos primeras dimensiones.
+
+3.  Calcular e interpretar la inercia total y el porcentaje de variabilidad explicado por las dos primeras dimensiones.
+
+4.  Identificar que grupos de personal aparecen mas asociados a la ausencia de consumo y cuales se sitúan mas proximos a los consumos medios o altos.
+
+5.  Indicar que filas y columnas contribuyen mas a la construccion de las dos primeras dimensiones y resumir la interpretacion del mapa.
+
+    ```{r}
+    data("smoke", package = "ca")
+    print("Tabla de contingencia (Grupos de personal vs Consumo):")
+    print(smoke)
+    ```
+
+-   en El grupo SE podemos observar que la tendencia es al no consumo de tabaco.
+
+-   En el grupo JE podemos observar como el consumo aumenta pero se mantiene equilibrado, por lo que puede ser un perfil de consumo moderado.
+
+-   En el grupo JM, aunque está formado por pocas personas, vemos una alta proporción de consumidores.
+
+-   En el grupo SM, también cuenta con pocos individuos pero orientado a un perfil de bajo consumo
+
+-   El grupo SC, también parece estar dentro de un perfil orientado al bajo o no consumo.
+
+```{r}
+modelo_ca <- CA(smoke, graph = FALSE)
+fviz_ca_biplot(modelo_ca, repel = TRUE, 
+               title = "Biplot Simétrico: Personal vs Consumo de Tabaco")
+
+```
+
+```{r}
+print("Inercia y varianza explicada por las dimensiones:")
+get_eigenvalue(modelo_ca)
+```
+
+```{r}
+print("Contribuciones de las FILAS (Grupos de personal):")
+round(modelo_ca$row$contrib[, 1:2], 2)
+
+print("Contribuciones de las COLUMNAS (Consumo de tabaco):")
+round(modelo_ca$col$contrib[, 1:2], 2)
+```
+
+Al analizar los valores propios, comprobamos que la **Dimensión 1** explica el **87.75%** de la variabilidad total, mientras que la **Dimensión 2** explica un **11.75%**. De forma conjunta, un mapa bidimensional es capaz de retener el **99.51%** de la información original. Esto significa que el biplot simétrico generado es una representación prácticamente perfecta de las asociaciones reales entre el personal y sus hábitos.
+
+Respecto a las dimensiones tenemos las siguientes observaciones:
+
+**Dimensión 1:** Como predecía la variabilidad (87.75%), este eje separa de forma radical el no consumo de cualquier tipo de consumo. Observando las contribuciones matemáticas, este eje está construido casi en su totalidad por el grupo de personal SE (aporta un 51.20% a la dimensión) y JE (33.10%) , en contraposición a la columna de consumo "none" (que contribuye con un masivo 65.40%).
+
+**Dimensión 2:** Esta dimensión vertical distingue los niveles o grados de tabaquismo. Las categorías que más contribuyen a formar este eje son el grupo JM (55.12%), junto con los consumos "heavy" (50.58%) y "light" (46.32%).
+
+Este analisis es coherente con los resultados obtenidos del biplot donde se observa lo siguiente:
+
+-   El grupo de personal **SE** aparece nítidamente posicionado junto a la categoría **"none"**, confirmando su perfil mayoritariamente no fumador.
+
+-   Por el contrario, el grupo **JM** se aleja en el espacio y se sitúa muy próximo a la categoría de consumo alto **heavy**.
+
+-   Los grupos intermedios se ubican cerca del origen o próximos a consumos moderados/leves.
